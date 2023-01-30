@@ -1,0 +1,35 @@
+{% extends "bootstrap/base.html" %}
+
+{% block content %}
+
+<table class="table table-hover">
+  <thead>
+    <tr>
+      <th>No</th>
+      <th>Type</th>
+      <th>Requirement</th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody>
+  	{% for req in requirements %}
+    <tr>
+      <td>{{ loop.index }}</td>
+      <td>{{ req.req_type | replace("_"," ") }}</td>
+      <td class="btn-popover" title="Story : {{ req.dfd_triple.stories.story }}">{{ req.req_text }}</td>
+      <td><a class="btn btn-danger btn-delete-per-req" title="Delete" rid="{{req.id}}"><span class="glyphicon glyphicon-trash"></span></a></td>
+    </tr>
+    {% endfor %}
+
+    {% for req in requirement_group %}
+    <tr>
+      <td>{{ loop.index }}</td>
+      <td>{{ req.req_type | replace("_"," ") }}</td>
+      <td class="btn-popover" title="Story : {{ req.dfd_triple_group.dfd.stories.split('###') | join(' ; ') | safe }}">{{ req.req_text }}</td>
+      <td><a class="btn btn-danger btn-delete-per-reqgroup" title="Delete" rid="{{req.id}}"><span class="glyphicon glyphicon-trash"></span></a></td>
+
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

@@ -1,0 +1,115 @@
+{% extends "bootstrap/base.html" %}
+
+{% block scripts %}
+    {{ super() }}
+    <script src="{{ url_for('static', filename='lib/bootstrap3-editable-1.5.1/bootstrap3-editable/js/bootstrap-editable.min.js') }}"></script>
+    <script src="{{ url_for('static', filename='lib/DataTables/datatables.min.js') }}"></script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/displacy.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='lib/DataTables/datatables.min.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='lib/bootstrap3-editable-1.5.1/bootstrap3-editable/css/bootstrap-editable.css') }}">
+    <script src="{{ url_for('static', filename='js/story_table.js') }}"></script>
+{% endblock %}
+
+{% block content %}
+
+<table class="table table-hover" id="table-story">
+  <thead>
+    <tr>
+      <th width="5%"><input type="checkbox" id="check-all"></th>
+      <th width="5%">No</th>
+      <th width="67%">Story</th>
+      <th width="5%">Quality</th>
+      <th width="5%">Disclosure Potential</th>
+      <!-- <th colspan="3" class="text-center">Entity</th> -->
+      <th width="13%">Action</th>
+    </tr>
+    <!-- <tr>
+      <th>Personal Data</th>
+      <th>Subject</th>
+      <th>Processing</th>
+    </tr> -->
+
+  </thead>
+  <tbody>
+    {% for story in stories %}
+    <tr>
+      <td><input type="checkbox" strid="{{ story.id }}" class="str-check"></td>
+      <td>{{loop.index}}</td>
+      <td><a href="#" class="story-text" data-value="{{ story.story }}" data-type="textarea" data-pk="{{ story.id }}" data-title="Input story">{{ story_ner[story.id]|safe }}</a></td>
+
+      <!-- <td>
+        <ul>
+          {% for ent in story_entity[story.id] %}
+          {% if ent.ent_type == "PII" %}
+          <li>{{ ent.label }}</li>
+          {% endif %}
+          {% endfor %}
+        </ul>
+      </td>
+      <td>
+        <ul>
+          {% for ent in story_entity[story.id] %}
+          {% if ent.ent_type == "Data" %}
+          <li>{{ ent.label }}</li>
+          {% endif %}
+          {% endfor %}
+        </ul>
+      </td>
+      <td>
+        <ul>
+          {% for ent in story_entity[story.id] %}
+          {% if ent.ent_type == "Processing" %}
+          <li>{{ ent.label }}</li>
+          {% endif %}
+          {% endfor %}
+        </ul>
+      </td> -->
+      {% if story.id in story_quality %}
+      <td>
+        <span class="label label-danger btn-popover" title="{{ story_quality[story.id].message }}">
+            {{ story_quality[story.id].kind }};{{ story_quality[story.id].subkind }}
+        </span>
+      </td>
+      {% else %}
+
+      {% if project.checked_quality %}
+      <td>
+        <span class="label label-success">Good</span>
+      </td>
+      {% else %}
+      <td>
+        <span class="label label-default">Not Checked</span>
+      </td>
+      {% endif %}
+
+      {% endif %}
+
+      {% if story.disclosure %}
+      <td>
+        <span class="label label-danger">Yes</span>
+      </td>
+      {% else %}
+
+      {% if project.checked_disclosure %}
+      <td>
+        <span class="label label-default">No</span>
+      </td>
+      {% else %}
+      <td>
+        <span class="label label-default">Not Checked</span>
+      </td>
+      {% endif %}
+
+      
+      {% endif %}
+      <td>
+        <a class="btn btn-warning btn-refresh-story btn-popover" title="Refresh Entity and DFD" stry_id="{{story.id}}"><span class="glyphicon glyphicon-refresh"></span></a> 
+        <a class="btn btn-success btn-dfd-per-story btn-popover" title="See DFD and Privacy Requirement" stry_id="{{story.id}}"><span class="glyphicon glyphicon-eye-open"></span></a> 
+        <a class="btn btn-danger btn-delete-per-story btn-popover" title="Delete Story" stry_id="{{story.id}}"><span class="glyphicon glyphicon-trash"></span></a> 
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+  
+</table>
+{% endblock %}

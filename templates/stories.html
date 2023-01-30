@@ -1,0 +1,136 @@
+{% extends "base.html" %}
+
+{% block scripts %}
+    {{ super() }}
+    <script src="{{ url_for('static', filename='js/stories.js') }}"></script>
+{% endblock %}
+
+{% block title %}Home{% endblock %}
+
+{% block content %}
+<div class="container">
+  <div class="row">
+
+    <h1>User Stories : {{ project.name }}</h1>
+
+    {% for message in get_flashed_messages() %}
+        <div class="alert alert-success">{{ message }}</div>
+    {% endfor %}
+
+    <div class="row">
+
+      <div class="col-md-6">
+        <button class="btn btn-info" id="btn-add-story" prj="{{project.id}}"><span class="glyphicon glyphicon-plus-sign" aria-hidden="true"></span>&nbsp;Add Story</button>
+
+        <button class="btn btn-info" id="btn-import-story" prj="{{project.id}}"><span class="glyphicon glyphicon-download-alt" aria-hidden="true"></span>&nbsp;Import Story From File</button>
+
+        <button class="btn btn-info" id="btn-privacy-backlog" prj="{{project.id}}"><span class="glyphicon glyphicon-th-list" aria-hidden="true"></span>&nbsp;See Privacy Backlog</button>
+
+        <div class="btn-group" role="group" aria-label="...">
+          <button class="btn btn-danger" id="btn-dfd-group" prj="{{project.id}}"><span class="glyphicon glyphicon-object-align-left" aria-hidden="true" title="based on checkbox"></span>&nbsp;Generate Grouped DFD</button>
+
+          <a class="btn btn-success"href="/see_group_dfd/{{project.id}}" target="_blank"><span class="glyphicon glyphicon-th-list" aria-hidden="true"></span>&nbsp; See Grouped DFD</a>
+        </div>
+
+      </div>
+      {% if stories|length > 0: %}
+
+      <div class="col-md-6">
+        <div class="btn-group" role="group" aria-label="...">
+          <button class="btn btn-danger" id="btn-aqusa" prj="{{project.id}}"><span class="glyphicon glyphicon-ok-sign" aria-hidden="true"></span>&nbsp;Check Quality</button>
+          <button class="btn btn-primary" id="btn-ner" prj="{{project.id}}"><span class="glyphicon glyphicon-eye-open" aria-hidden="true"></span>&nbsp;Recognize Entity & Disclosure</button>
+
+          <button class="btn btn-success" id="btn-dfd" prj="{{project.id}}"><span class="glyphicon glyphicon-object-align-left" aria-hidden="true"></span>&nbsp;Generate Individual DFD</button>
+          
+          <button class="btn btn-warning" id="btn-pattern" prj="{{project.id}}"><span class="glyphicon glyphicon-object-align-left" aria-hidden="true"></span>&nbsp;Generate Pattern Recommendation</button>
+        </div>
+      </div>
+
+      <br>
+      <br>
+
+      {% endif %}
+
+
+    </div>
+
+    <div class="row">
+
+      <div class="col-md-12">
+
+        <br>
+
+        <button class="btn btn-primary" type="button" data-toggle="collapse" data-target="#collapseFilter" aria-expanded="false" aria-controls="collapseFilter">
+          <span class="glyphicon glyphicon-filter" aria-hidden="true"></span>&nbsp; Filter
+        </button>
+        <div class="collapse" id="collapseFilter">
+          <div class="well">
+            <table class="table">
+                <tr>
+                  <th><mark data-entity="Subject">Data Subject</mark></th>
+                  <td>
+                    {% for ent in subject_entities %}
+                    <input type="checkbox" name="filter-entity" class="filter-entity" value="{{ ent.label }}">{{ ent.label }} &nbsp;
+                    {% endfor %}
+                  </td>
+                </tr>
+
+                <tr>
+                  <th><mark data-entity="Processing">Processing</mark></th>
+                  <td>
+                    {% for ent in processing_entities %}
+                    <input type="checkbox" name="filter-entity" class="filter-entity" value="{{ ent.label }}">{{ ent.label }} &nbsp;
+                    {% endfor %}
+                  </td>
+                </tr>
+                <tr>
+                  <th><mark data-entity="PII">PII</mark></th>
+                  <td>
+                    {% for ent in pii_entities %}
+                    <input type="checkbox" name="filter-entity" class="filter-entity" value="{{ ent.label }}">{{ ent.label }} &nbsp;
+                    {% endfor %}
+                  </td>
+                </tr>
+            </table>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+
+
+
+  </div>
+
+  <br>
+
+  <div class="row">
+    <img style="display: none;" id="progress-bar" src="{{ url_for('static', filename='img/progress.gif') }}">
+    <div style="display: none;" id="success-message" class="alert alert-success" role="alert">
+      Process is success!
+    </div>
+  </div>
+
+  <div class="row" id="story-table-container" prj="{{project.id}}">
+    
+  </div>
+
+  <div class="modal fade" id="empModal" role="dialog">
+      <div class="modal-dialog">
+          <div class="modal-content">
+              <div class="modal-header">
+                  <h4 class="modal-title"></h4>
+                <button type="button" class="close" data-dismiss="modal">×</button>
+              </div>
+              <div class="modal-body">
+              </div>
+              <div class="modal-footer">
+                <button type="button" class="btn btn-default" data-dismiss="modal">Close</button>
+              </div>
+          </div>
+      </div>
+  </div>
+  
+</div>
+{% endblock %}

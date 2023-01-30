@@ -1,0 +1,133 @@
+
+
+<blockquote class="blockquote text-center"><p class="mb-0">{{ dfd.stories.split('###') | join('<br/>') | safe }}</p></blockquote>
+
+{% block content %}
+
+<ul class="nav nav-tabs">
+  <li class="active"><a data-toggle="tab" href="#home">DFD</a></li>
+  <li><a data-toggle="tab" href="#menu1">Requirements</a></li>
+  <li><a data-toggle="tab" href="#menu2">Robustness</a></li>
+  <li><a data-toggle="tab" href="#menu3">Design Pattern Recommendation</a></li>
+</ul>
+<div class="tab-content">
+  <div id="home" class="tab-pane fade in active">
+    
+
+    <div class="row">
+      <img class="img-responsive" style="margin: 0 auto;" src="{{ url_for('static', filename=url_dfd) }}">
+    </div>
+
+
+    <div class="row" style="margin:5px">
+      <h4>DFD Triples</h4>
+
+      <table class="table table-hover table-responsive">
+        <thead>
+          <tr>
+            <th>External Entity</th>
+            <th>Process</th>
+            <th>Data Store</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for triple in triples %}
+          <tr>
+            <td class="text-triple" data-pk="{{ triple.id }}" data-name="external_entity">{{ triple.external_entity }}</td>
+            <td class="text-triple" data-pk="{{ triple.id }}" data-name="process">{{ triple.process }}</td>
+            <td class="text-triple" data-pk="{{ triple.id }}" data-name="data_store">{{ triple.data_store }}</td>
+            <td><a class="btn btn-danger btn-delete-per-triple" title="Delete" tripleid="{{triple.id}}"><span class="glyphicon glyphicon-trash"></span></a></td>
+          </tr>
+          {% endfor %}
+
+        </tbody>
+      </table>
+
+      <form method="POST" action="/regenerate_req">
+        <div class="form-group">
+          <input type="hidden" name="dfd_id" value="{{ dfd.id }}">
+        </div>
+        
+        <button type="submit" class="btn btn-danger">Regenerate Privacy Requirement</button>
+      </form>
+
+    </div>
+
+    <div class="row">
+      <a style="margin:10px;float: right;" href="{{ url_for('static', filename=url_dfd_xml) }}" target="_blank" class="btn btn-info"><span class="glyphicon glyphicon-save"> Download XML for editing in draw.io</a>
+    </div>
+
+    <form method="POST" action="/replace_dfd" enctype=multipart/form-data>
+      <div class="form-group">
+
+        <h5>Replace DFD Image (must be in .png format)</h5>
+        <input type="hidden" name="dfdid" value="{{ dfd.id }}">
+        <input type="file" class="form-control" required="required" accept="image/png" name="file" id="dfdInput">
+      </div>
+      
+      <button type="submit" class="btn btn-danger">Replace</button>
+    </form>
+
+
+  </div>
+  <div id="menu1" class="tab-pane fade">
+
+     {% for r in all_requirements %}
+     <h5>Requirement For: 
+     <mark data-entity='Subject'>{{ r.triples.external_entity }}</mark>
+     <mark data-entity='Processing'>{{ r.triples.process }}</mark>
+     <mark data-entity='PII'>{{ r.triples.data_store }}</mark>
+     </h5>
+     {% for req in r.requirements %}
+
+     <div class="panel-group" id="accordion">
+        <div class="panel panel-default">
+          <div class="panel-heading">
+            <h4 class="panel-title">
+              <a data-toggle="collapse" data-parent="#accordion" href="#collapse{{ req.id }}">
+              {{ req.req_type | replace("_"," ") }}</a>
+            </h4>
+          </div>
+          <div id="collapse{{ req.id }}" class="panel-collapse collapse">
+            <div class="panel-body">
+
+              {{ req.req_text | safe }}
+
+              {% if req.valid == "yes" %}
+              <form class="validate_req_form" rqid="{{ req.id }}" rqv="no" method="POST" action="/validate_req">
+                <button type="submit" class="btn btn-danger"><span class="glyphicon glyphicon-remove" aria-hidden="true"></span>&nbsp; Remove from Privacy Backlog</button>
+              </form>
+              {% else %}
+              <form class="validate_req_form" rqid="{{ req.id }}" rqv="yes" method="POST" action="/validate_req">
+                <button type="submit" class="btn btn-success"><span class="glyphicon glyphicon-ok" aria-hidden="true"></span>&nbsp; Add to Privacy Backlog</button>
+              </form>
+              {% endif %}
+
+            </div>
+          </div>
+
+        </div>
+        
+      </div> 
+
+     {% endfor %}
+     {% endfor %}
+
+  </div>
+
+  <div id="menu2" class="tab-pane fade">
+    <div class="row">
+      <img class="img-responsive" style="margin: 0 auto;" src="{{ url_for('static', filename=url_robust) }}">
+    </div>
+
+  </div>
+
+  <div id="menu3" class="tab-pane fade">
+    <div class="row" id="privacy-pattern-recommendation">
+
+    </div>
+  </div>
+</div>
+
+{% endblock %}
