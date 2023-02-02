@@ -4,6 +4,7 @@ Privacy by design requires that developers address privacy concerns from the ear
 
 ## Cite this tool
 
+```
 @inproceedings{herwanto2022privacystory,
   title={PrivacyStory: Tool Support for Extracting Privacy Requirements from User Stories},
   author={Herwanto, Guntur Budi and Quirchmayr, Gerald and Tjoa, A Min},
@@ -12,4 +13,4 @@ Privacy by design requires that developers address privacy concerns from the ear
   year={2022},
   organization={IEEE}
 }
-
+```
