@@ -22,15 +22,15 @@ lemmatizer = WordNetLemmatizer()
 import collections
 
 class StoryDFD():
-    def __init__(self):
+    def __init__(self, dfd_folder):
         self.initModels()
         self.privacy_only = False
         self.so_that = {}
-        self.root_folder = "static/dfd/"
+        self.root_folder = dfd_folder
 
     def initModels(self):
         logging.info('Initating NER Model')
-        NER_MODEL_PATH = "static/model/ner-model.pt"
+        NER_MODEL_PATH = "static/model/ner-model-roberta-aug-mr-jean-baptiste.pt"
         self.model = SequenceTagger.load(NER_MODEL_PATH)
 
         logging.info('Initating Spacy NLP Model')
@@ -77,9 +77,24 @@ class StoryDFD():
 
         
     def getUniqueEntitiesByLabel(self, entity_label):
-        entities = []
+        entities_data = []
         entities_dict = {}
 
+        for i, entities in enumerate(self.ner_data):
+            for entity in entities:
+                label = entity.get_label("ner").value
+
+                if entity_label != label:
+                    continue
+
+                if entity.text not in entities_dict:
+                    entities_data.append(entity.text)
+                    entities_dict[entity.text] = [self.stories[i]]
+                else:
+                    entities_dict[entity.text].append(self.stories[i])
+
+        '''
+        OLD Flair
         for data in self.ner_data:
             for entity in data["entities"]:
                 label = entity["labels"][0].value
@@ -91,9 +106,10 @@ class StoryDFD():
                     entities_dict[entity["text"]] = [data["text"]]
                 else:
                     entities_dict[entity["text"]].append(data["text"])
+        '''
 
         # key = entity text, value = user story text
-        return entities_dict, entities
+        return entities_dict, entities_data
 
     def getStoriesByLabel(self, entity_label):
         stories = []
@@ -148,7 +164,9 @@ class StoryDFD():
         for i, story in enumerate(self.stories):
             sentence = Sentence(story)
             self.model.predict(sentence)
-            self.ner_data.append(sentence.to_dict(tag_type='ner'))
+            self.ner_data.append(sentence.get_spans('ner'))
+            ## old flair
+            ## self.ner_data.append(sentence.to_dict(tag_type='ner'))
 
     def buildNLP(self):
         logging.info('Building NLP data from the Stories')

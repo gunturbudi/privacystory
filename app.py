@@ -1,23 +1,33 @@
-from flask import Flask, render_template, request, jsonify, url_for, redirect, flash
-from flask_bootstrap import Bootstrap
-from flask_sqlalchemy import SQLAlchemy
+import csv, os, re
 from datetime import datetime
 import subprocess
+from sqlalchemy import func
 
-import csv, os, re
+
+from flask import Flask, render_template, request, jsonify, url_for, redirect, flash
+from flask_bootstrap import Bootstrap
+from flask_login import login_user, logout_user, login_required, current_user, LoginManager
+from flask_sqlalchemy import SQLAlchemy
+from flask_wtf import FlaskForm
+from wtforms import StringField, SubmitField
+
+from werkzeug.security import generate_password_hash, check_password_hash, generate_password_hash
 from werkzeug.utils import secure_filename
+
 from flair.data import Sentence
 from flair.models import SequenceTagger
-from flair.models import TextClassifier
+model_ner = SequenceTagger.load('static/model/ner-model-roberta-aug-mr-jean-baptiste.pt')
 
-from predus import predict_disclosure
+from model import db, User, Project, Stories, StoryQuality, Entities, Dfd, Dfd_triple, Dfd_triple_group, RequirementGroup, Requirements, RequirementGroupsPatterns, RequirementsPatterns, PrivacyPattern, LogAction, PatternCategory
+
 
 from feature_engineering import PrivacyPatternFeatures
 pp = PrivacyPatternFeatures()
+pattern_dict = pp.get_lookup_patterns()
 
 # faster debug
 # model_disclosure = TextClassifier.load('static/model/disclosure-model.pt')
-model_ner = SequenceTagger.load('static/model/ner-model.pt')
+
 
 # model_disclosure = None
 # model_ner = None
@@ -30,169 +40,164 @@ app.config['SECRET_KEY'] = "sdfawfeaw2b9a5d0208a72aasdqw1231234feba25506"
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['BOOTSTRAP_SERVE_LOCAL'] = True
 
-db = SQLAlchemy(app)
-
+db.init_app(app)
 Bootstrap(app)
-  
-class Project(db.Model):
-  id = db.Column(db.Integer, primary_key=True)
-  name = db.Column(db.String(255), nullable=False)
-  checked_entity = db.Column(db.Boolean, nullable=True)
-  checked_quality = db.Column(db.Boolean, nullable=True)
-  checked_disclosure = db.Column(db.Boolean, nullable=True)
 
-  stories = db.relationship('Stories', backref='project', lazy=True)
-  dfds = db.relationship('Dfd', backref='project', lazy=True)
+global root_dfd_folder
+root_dfd_folder = "static/dfd/"
 
-  def __init__(self, name):
-    self.name = name
-
-  def __repr__(self):
-    return "Project %r Created" % name
-
-class Stories(db.Model):
-  id = db.Column(db.Integer, primary_key=True)
-  project_id = db.Column(db.Integer, db.ForeignKey('project.id'), nullable=False)
-  story = db.Column(db.String(255), nullable=False)
-  disclosure = db.Column(db.Boolean, nullable=True)
-  probability_disclosure = db.Column(db.Float, nullable=True)
-
-  entities = db.relationship('Entities', backref='stories', lazy=True)
-  quality = db.relationship('StoryQuality', backref='stories', lazy=True)
-  triples = db.relationship('Dfd_triple', backref='stories', lazy=True)
-
-  def __init__(self, project_id, story):
-    self.project_id = project_id
-    self.story = story
-
-  def __repr__(self):
-    return "Story "%r" Created" % story
-
-class StoryQuality(db.Model):
-  id = db.Column(db.Integer, primary_key=True)
-  story_id = db.Column(db.Integer, db.ForeignKey('stories.id'), nullable=False)
-  story = db.Column(db.String(255), nullable=False)
-  kind = db.Column(db.String(1000), nullable=True)
-  subkind = db.Column(db.String(1000), nullable=True)
-  message = db.Column(db.String(1000), nullable=True)
-
-  def __init__(self, story_id, story, kind, subkind, message):
-    self.story_id = story_id
-    self.story = story
-    self.kind = kind
-    self.subkind = subkind
-    self.message = message
+login_manager = LoginManager()
+login_manager.login_view = "login"
+login_manager.init_app(app)
 
 
-class Entities(db.Model):
-  id = db.Column(db.Integer, primary_key=True)
-  story_id = db.Column(db.Integer, db.ForeignKey('stories.id'), nullable=False)
-  start = db.Column(db.Integer, nullable=False)
-  end = db.Column(db.Integer, nullable=False)
-  label = db.Column(db.String(255), nullable=False)
-  ent_type = db.Column(db.String(255), nullable=False)
+class LogFilterForm(FlaskForm):
+    username = StringField('Username')
+    submit = SubmitField('Get Logs')
+    
+def create_initial_data():
+    db.create_all()
+    # create initial user
+    initial_user = User(username="admin", 
+                        email="gunturbudi@ugm.ac.id",
+                        password=generate_password_hash("InitialPassword"), # consider hashing this password for security
+                        is_active=True,
+                        has_consented=True)
 
-  def __init__(self, story_id, start, end, label, ent_type):
-    self.story_id = story_id
-    self.start = start
-    self.end = end
-    self.label = label
-    self.ent_type = ent_type
-
-  def __repr__(self):
-    return "Entitiy "%r" Created" % label
-
-class Dfd(db.Model):
-  id = db.Column(db.Integer, primary_key=True)
-  project_id = db.Column(db.Integer, db.ForeignKey('project.id'), nullable=False)
-  story_ids = db.Column(db.String(2000), nullable=False)
-  stories = db.Column(db.String(5000), nullable=False)
-  filename = db.Column(db.String(2000), nullable=False)
-  date_created = db.Column(db.DateTime, default=datetime.utcnow)
-
-  triple_group = db.relationship('Dfd_triple_group', backref='dfd', lazy=True)
-
-  def __init__(self, project_id, story_ids, stories, filename):
-    self.project_id = project_id
-    self.story_ids = story_ids
-    self.stories = stories
-    self.filename = filename
-
-  def __repr__(self):
-    return "DFD Created"
-
-class Dfd_triple(db.Model):
-  id = db.Column(db.Integer, primary_key=True)
-  story_id = db.Column(db.Integer, db.ForeignKey('stories.id'), nullable=False)
-  external_entity = db.Column(db.String(2000), nullable=False)
-  process = db.Column(db.String(2000), nullable=False)
-  data_store = db.Column(db.String(2000), nullable=False)
-
-  requirements = db.relationship('Requirements', backref='dfd_triple', lazy=True, cascade="all, delete-orphan")
-
-  def __init__(self, story_id, external_entity, process, data_store):
-    self.story_id = story_id
-    self.external_entity = external_entity
-    self.process = process
-    self.data_store = data_store
-
-class Dfd_triple_group(db.Model):
-  id = db.Column(db.Integer, primary_key=True)
-  dfd_id = db.Column(db.Integer, db.ForeignKey('dfd.id'), nullable=False)
-  external_entity = db.Column(db.String(2000), nullable=False)
-  process = db.Column(db.String(2000), nullable=False)
-  data_store = db.Column(db.String(2000), nullable=False)
-
-  requirements = db.relationship('RequirementGroup', backref='dfd_triple_group', lazy=True, cascade="all, delete-orphan")
-
-  def __init__(self, dfd_id, external_entity, process, data_store):
-    self.dfd_id = dfd_id
-    self.external_entity = external_entity
-    self.process = process
-    self.data_store = data_store
-
-class Requirements(db.Model):
-  id = db.Column(db.Integer, primary_key=True)
-  triple_id = db.Column(db.Integer, db.ForeignKey('dfd_triple.id'), nullable=False)
-  req_type = db.Column(db.String(255), nullable=False)
-  req_text = db.Column(db.String(2000), nullable=False)
-  valid = db.Column(db.String(200), nullable=False, default="no")
-  date_created = db.Column(db.DateTime, default=datetime.utcnow)
-
-  def __init__(self, triple_id, req_type, req_text):
-    self.triple_id = triple_id
-    self.req_type = req_type
-    self.req_text = req_text
-
-class RequirementGroup(db.Model):
-  id = db.Column(db.Integer, primary_key=True)
-  triple_id = db.Column(db.Integer, db.ForeignKey('dfd_triple_group.id'), nullable=False)
-  req_type = db.Column(db.String(255), nullable=False)
-  req_text = db.Column(db.String(2000), nullable=False)
-  valid = db.Column(db.String(200), nullable=False, default="no")
-  date_created = db.Column(db.DateTime, default=datetime.utcnow)
-
-  def __init__(self, triple_id, req_type, req_text):
-    self.triple_id = triple_id
-    self.req_type = req_type
-    self.req_text = req_text
-
+    db.session.add(initial_user)
+    db.session.commit()
+    
 def allowed_file(filename, allowed_extensions=['txt']):
     return '.' in filename and \
            filename.rsplit('.', 1)[1].lower() in allowed_extensions
 
+def save_action(action):
+    username = current_user.username
+    timestamp = datetime.now()
+    new_action = LogAction(username=username, action=action, timestamp=timestamp)
+    db.session.add(new_action)
+    db.session.commit()
+    
+@login_manager.user_loader
+def load_user(user_id):
+    return db.session.get(User,int(user_id))
+  
 @app.route('/')
+@login_required
 def index():
-  story_count = {}
-  projects = Project.query.all()
-  for project in projects:
-    story_count[project.id] = Stories.query.filter(Stories.project_id==project.id).count()
+    save_action("project_list")
+    story_count = {}
+    projects = Project.query.filter_by(user_id=current_user.id).all()
+    for project in projects:
+        story_count[project.id] = Stories.query.filter(Stories.project_id==project.id).count()
 
-  return render_template('index.html', projects=projects, story_count=story_count)
+    return render_template('index.html', projects=projects, story_count=story_count)
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        username = request.form['username']
+        password = request.form['password']
+        user = User.query.filter_by(username=username).first()
+        if user and check_password_hash(user.password, password):
+            login_user(user)
+            global root_dfd_folder
+            root_dfd_folder = "static/dfd/" + str(current_user.id)
+            save_action("login")
+            flash('You have successfully logged in!')
+            return redirect(url_for('index'))
+        
+        flash('Invalid username or password')
+        
+    return render_template('login.html')
+  
+@app.route('/logout')
+@login_required
+def logout():
+    save_action("logout")
+    logout_user()
+    root_dfd_folder = "static/dfd"
+    flash('You have successfully logged out!')
+    return redirect(url_for('login'))
+
+@app.route('/filter_logs', methods=['GET', 'POST'])
+@login_required
+def filter_logs():
+    form = LogFilterForm()
+    logs = None
+    action_time_diff = {}
+    time_differences = []
+
+    if form.validate_on_submit():
+        username = form.username.data
+        logs = LogAction.query.filter_by(username=username).order_by(LogAction.timestamp.asc()).all()
+
+        # Time difference between each subsequent action
+        for i in range(1, len(logs)):
+            previous_log = logs[i-1]
+            current_log = logs[i]
+            time_diff = (current_log.timestamp - previous_log.timestamp).total_seconds()
+            current_log.time_difference = time_diff  # Store time difference in the log object
+            time_differences.append({
+                'time_diff': time_diff,
+                'previous_action': previous_log.action,
+                'current_action': current_log.action
+            })
+
+        # Time difference between learning and answer actions for each phrase number
+        for log in logs:
+            if 'learning phrase' in log.action:
+                phrase_number = log.action.split('- ')[1].strip()
+                if phrase_number not in action_time_diff:
+                    action_time_diff[phrase_number] = {'learning': log.timestamp, 'answer': None, 'difference': None}
+            elif 'answer phrase' in log.action:
+                phrase_number = log.action.split('- ')[1].strip()
+                if phrase_number in action_time_diff and action_time_diff[phrase_number]['answer'] is None:
+                    action_time_diff[phrase_number]['answer'] = log.timestamp
+                    action_time_diff[phrase_number]['difference'] = (action_time_diff[phrase_number]['answer'] - action_time_diff[phrase_number]['learning']).total_seconds()
+
+    return render_template('filter_logs.html', form=form, logs=logs, action_time_diff=action_time_diff, time_differences=time_differences)
+
+@app.route('/register', methods=['GET', 'POST'])
+def register():
+    if request.method == 'POST':
+        username = request.form['username']
+        email = request.form['email']
+        password = request.form['password']
+        password_confirmation = request.form['password_confirmation']
+        consent = request.form.get('consent')
+        if not consent:
+            flash('You must agree to the informed consent form to register.')
+            return redirect(url_for('register'))
+        if password != password_confirmation:
+            flash('Passwords do not match')
+            return redirect(url_for('register'))
+        existing_user = User.query.filter_by(username=username).first()
+        if existing_user:
+            flash('This username is already taken')
+            return redirect(url_for('register'))
+        
+            
+        user = User(username=username, email=email, password=generate_password_hash(password), is_active=True, has_consented=True)
+        db.session.add(user)
+        db.session.commit()
+        
+        flash('You have successfully registered!')
+        return redirect(url_for('login'))
+    
+    return render_template('register.html')
+
+
+@app.route('/consent')
+def consent():
+    return render_template('consent.html')  
 
 @app.route('/add_project', methods=('GET', 'POST'))
+@login_required
 def add_project():
   if request.method == 'POST':
+    save_action("add_project")
+    
     name = request.form['name']
 
     if not name:
@@ -202,9 +207,12 @@ def add_project():
 
       db.session.add(new_project)
       db.session.commit()
+      
+      if not os.path.exists(root_dfd_folder):
+        os.mkdir(root_dfd_folder)
 
-      if not os.path.exists("static/dfd/{}".format(name)):
-        os.mkdir("static/dfd/{}".format(name))
+      if not os.path.exists(root_dfd_folder + "/{}".format(name)):
+        os.mkdir(root_dfd_folder + "/{}".format(name))
 
       flash("Project Added")
 
@@ -213,8 +221,10 @@ def add_project():
   return jsonify({'htmlresponse' : render_template('add_project.html')})
 
 @app.route('/add_story', methods=('GET', 'POST'))
+@login_required
 def add_story():
   if request.method == 'POST':
+    save_action("add_story")
     story = request.form['story']
     project_id = request.form['project_id']
 
@@ -234,8 +244,10 @@ def add_story():
 
 
 @app.route('/edit_story', methods=['POST'])
+@login_required
 def edit_story():
   if request.method == 'POST':
+    save_action("edit_story")
     story_to_be_updated = Stories.query.filter_by(id=request.form['pk']).first()
     story_to_be_updated.story = request.form["value"]
 
@@ -244,9 +256,23 @@ def edit_story():
 
   return jsonify({'success' : 'success'})
 
+@app.route('/edit_backlog', methods=['POST'])
+@login_required
+def edit_backlog():
+  if request.method == 'POST':
+    save_action("edit_backlog")
+    story_to_be_updated = Requirements.query.filter_by(id=request.form['pk']).first()
+    story_to_be_updated.req_text = request.form["value"]
+    
+    db.session.commit()
+
+  return jsonify({'success' : 'success'})
+
 @app.route('/edit_triple', methods=['POST'])
+@login_required
 def edit_triple():
   if request.method == 'POST':
+    save_action("edit_triple")
     triple_to_be_updated = Dfd_triple.query.filter_by(id=request.form['pk']).first()
     if request.form['name'] == 'external_entity':
       triple_to_be_updated.external_entity = request.form["value"]
@@ -263,8 +289,10 @@ def edit_triple():
 
 
 @app.route('/regenerate_req', methods=['POST'])
+@login_required
 def regenerate_req():
   if request.method == 'POST':
+    save_action("regenerate_req")
     story_id = request.form['story_id']
     story = Stories.query.filter_by(id=story_id).one()
     triples = Dfd_triple.query.filter(Dfd_triple.story_id==story_id).all()
@@ -283,8 +311,10 @@ def regenerate_req():
     
 
 @app.route('/validate_req', methods=['POST'])
+@login_required
 def validate_req():
   if request.method == 'POST':
+    save_action("validate_req")
     req_id = request.form['rqid']
     req = Requirements.query.filter_by(id=req_id).one()
     req.valid = request.form['rqv']
@@ -295,8 +325,10 @@ def validate_req():
 
 
 @app.route('/validate_req_group', methods=['POST'])
+@login_required
 def validate_req_group():
   if request.method == 'POST':
+    save_action("validate_req_group")
     req_id = request.form['rqid']
     req = RequirementGroup.query.filter_by(id=req_id).one()
     req.valid = request.form['rqv']
@@ -306,8 +338,10 @@ def validate_req_group():
   return jsonify({'success' : 'success'})
 
 @app.route('/unvalidate_req', methods=['POST'])
+@login_required
 def unvalidate_req():
   if request.method == 'POST':
+    save_action("unvalidate_req")
     req_id = request.form['rqid']
     req = Requirements.query.filter_by(id=req_id).one()
     req.valid = "no"
@@ -318,8 +352,10 @@ def unvalidate_req():
 
 
 @app.route('/unvalidate_req_group', methods=['POST'])
+@login_required
 def unvalidate_req_group():
   if request.method == 'POST':
+    save_action("unvalidate_req_group")
     req_id = request.form['rqid']
     req = RequirementGroup.query.filter_by(id=req_id).one()
     req.valid = "no"
@@ -328,12 +364,50 @@ def unvalidate_req_group():
 
   return jsonify({'success' : 'success'})
 
+@app.route('/show_solution', methods=['POST'])
+def show_solution():
+  save_action("show_solution")
+  req_id = request.form['req_id']
+  project_id = request.form['prj_id']
+  
+  top = 5
+  recommendations = []
+  
+  with open("LTR_resources/ltr_output_{}.txt".format(project_id), "r") as ff:
+    for f in ff:
+      
+      if f.startswith(str(req_id)):
+        top -= 1
+        
+        pattern_title = f.split()[2].replace("docid=","")
+        recommendations.append(pattern_dict[pattern_title])
+        
+      if top == 0:
+        break
+
+  return jsonify({'htmlresponse' : render_template('solution.html', recommendations=recommendations)})
+
 def refresh_ner(story_id, story):
   Entities.query.filter(Entities.story_id==story_id).delete()
 
   sentence = Sentence(story)
 
   model_ner.predict(sentence)
+  
+  is_disclosure = False
+
+  for entity in sentence.get_spans('ner'):
+    new_entity = Entities(story_id, entity.start_position, entity.end_position, story[entity.start_position:entity.end_position], entity.get_label("ner").value)
+    if entity.get_label("ner").value == "PII" or entity.get_label("ner").value == "Processing":
+      is_disclosure = True
+
+    db.session.add(new_entity)
+
+
+  story_to_be_updated = Stories.query.filter_by(id=story_id).first()
+
+  '''
+  Old Flair
 
   m = sentence.to_dict(tag_type='ner')
 
@@ -342,7 +416,9 @@ def refresh_ner(story_id, story):
 
     db.session.add(new_entity)
 
-  story_to_be_updated = Stories.query.filter_by(id=story_id).first()
+  '''
+
+
 
   '''
   model_disclosure.predict(sentence)
@@ -352,20 +428,27 @@ def refresh_ner(story_id, story):
   '''
 
   # PreDUS
-  probability = predict_disclosure(story)
+  # probability = predict_disclosure(story)
 
-  story_to_be_updated.disclosure = 1 if probability>0.5 else 0
-  story_to_be_updated.probability_disclosure = probability
+  # story_to_be_updated.disclosure = 1 if probability>0.5 else 0
+  # story_to_be_updated.probability_disclosure = probability
+  
+  # We change Predus with NER conditions. If PII or processing is present in the history, then it is likely to have disclosure
+  story_to_be_updated.disclosure = is_disclosure
 
   db.session.commit()
 
 @app.route('/delete_story', methods=('POST', 'DELETE'))
+@login_required
 def delete_story():
   if request.method == 'DELETE':
+    save_action("delete_story")
     print(request.form['story_id'])
     return jsonify({'htmlresponse' : render_template('delete_story.html', story_id=request.form['story_id'])})
 
   elif request.method == 'POST':
+    save_action("delete_story")
+    
     story_id = request.form['story_id']
 
     story_to_be_deleted = Stories.query.filter(Stories.id==story_id).one()
@@ -377,7 +460,7 @@ def delete_story():
 
     format_type = [".csv", ".dot", ".xml", "_dfd.png", "_robust.png", "_robust.txt"]
     for f in format_type:
-      filepath = "static/dfd/{}/s_{}_{}".format(project.name, story_id, f)
+      filepath = root_dfd_folder + "/{}/s_{}_{}".format(project.name, story_id, f)
       if os.path.exists(filepath):
         os.remove(filepath)
 
@@ -399,8 +482,11 @@ def import_story_from_file(project_id, story_filepath):
   db.session.commit()
 
 @app.route('/import_story', methods=('GET', 'POST'))
+@login_required
 def import_story():
   if request.method == 'POST':
+      save_action("import_story")
+    
       project_id = request.form['project_id']
 
       # check if the post request has the file part
@@ -429,8 +515,11 @@ def import_story():
   return jsonify({'htmlresponse' : render_template('import_story.html', project_id=request.args.get('project_id'))})
 
 @app.route('/replace_dfd', methods=('GET', 'POST'))
+@login_required
 def replace_dfd():
   if request.method == 'POST':
+      save_action("replace_dfd")
+      
       story_id = request.form['story_id']
       story = Stories.query.filter(Stories.id==story_id).one()
       project = Project.query.filter(Project.id==story.project_id).one()
@@ -451,8 +540,8 @@ def replace_dfd():
 
       if file and allowed_file(file.filename, ['png']):
           # filename = secure_filename(file.filename)
-          filename = "static/dfd/{}/s_{}_dfd.png".format(project.name, story_id)
-          file.save(os.path.join("static/dfd/{}".format(project.name), "s_{}_dfd.png".format(story_id)))
+          filename = root_dfd_folder + "/{}/s_{}_dfd.png".format(project.name, story_id)
+          file.save(os.path.join(root_dfd_folder + "/{}".format(project.name), "s_{}_dfd.png".format(story_id)))
 
       flash("DFD of story \"{}\" successfully replaced".format(story.story))
 
@@ -462,7 +551,10 @@ def replace_dfd():
 
 
 @app.route('/stories/<int:project_id>')
+@login_required
 def stories(project_id):
+  save_action("story_table")
+  
   project = Project.query.filter(Project.id==project_id).one()
   stories = Stories.query.filter(Stories.project_id==project_id).all()
 
@@ -475,7 +567,10 @@ def stories(project_id):
 
 
 @app.route('/see_group_dfd/<int:project_id>')
+@login_required
 def see_group_dfd(project_id):
+  save_action("see_group_dfd")
+  
   project = Project.query.filter(Project.id==project_id).one()
   dfds = Dfd.query.filter(project_id==project_id).all()
 
@@ -483,7 +578,9 @@ def see_group_dfd(project_id):
 
 
 @app.route('/story_table', methods=['POST'])
+@login_required
 def story_table():
+  save_action("story_table")
   project_id = request.form['project_id']
   project = Project.query.filter(Project.id==project_id).one()
 
@@ -526,7 +623,9 @@ def story_table():
 # https://github.com/PrettyPrinted/AJAX_Forms_jQuery_Flask/blob/master/process.py
 
 @app.route('/aqusa', methods=['POST'])
+@login_required
 def aqusa():
+  save_action("aqusa")
   project_id = request.form['project_id']
   project_to_be_updated = Project.query.filter_by(id=project_id).first()
   project_to_be_updated.checked_quality = 1
@@ -563,7 +662,9 @@ def recheck_quality(project_id):
 
 
 @app.route('/gen_ner', methods=['POST'])
+@login_required
 def gen_ner():
+  save_action("gen_ner")
   project_id = request.form['project_id']
   project = Project.query.filter(Project.id==project_id).one()
   stories = Stories.query.filter(Stories.project_id==project_id).all()
@@ -629,8 +730,7 @@ def save_dfd_triple(csv_filename, story_id=None, dfd_id=None):
     db.session.commit()
   
 
-def save_dfd_triples(project_name):
-  folder_path = "static/dfd/{}".format(project_name)
+def save_dfd_triples(folder_path):
   for fl in os.listdir(folder_path):
     if not fl.endswith(".csv"):
       continue
@@ -702,49 +802,109 @@ def save_privacy_requirement_group(dfdid):
 
 
 @app.route('/gen_dfd', methods=['POST'])
+@login_required
 def gen_dfd():
+  save_action("gen_dfd")
   from dfd_generation import StoryDFD
 
   project_id = request.form['project_id']
   project = Project.query.filter(Project.id==project_id).one()
   stories = Stories.query.filter(Stories.project_id==project_id).all()
 
-  dd = StoryDFD()
+  dd = StoryDFD(root_dfd_folder +  "/")
   dd.setStories([story.story for story in stories], [story.id for story in stories])
   dd.processDFDPerStory(project.name)
 
-  save_dfd_triples(project.name)
+  save_dfd_triples(root_dfd_folder + "/" + project.name)
   save_privacy_requirements(stories)
 
   return jsonify({'success' : 'success'})
 
-@app.route('/gen_pattern_recommendation', methods=['POST'])
-def gen_pattern_recommendation():
-  project_id = request.form['project_id']
-  project = Project.query.filter(Project.id==project_id).one()
-  stories = Stories.query.filter(Stories.project_id==project_id).all()
+@app.route('/see_backlog/<int:project_id>')
+@login_required
+def see_backlog(project_id):
+  save_action("see_backlog")
+  requirements = Requirements.query.join(Dfd_triple, Dfd_triple.id==Requirements.triple_id).join(Stories, Stories.id==Dfd_triple.story_id).filter(Stories.project_id==project_id, Requirements.valid=="yes").all()
 
-  X, title, excerpt = pp.get_corpus_pattern()
+  requirement_group = RequirementGroup.query.join(Dfd_triple_group, Dfd_triple_group.id==RequirementGroup.triple_id).join(Dfd, Dfd.id==Dfd_triple_group.dfd_id).filter(Dfd.project_id==project_id, RequirementGroup.valid=="yes").all()
 
+  req_ner = {}
+  req_group_ner = {}
+  
+  for req in requirements:
+      pattern = re.compile(req.dfd_triple.process, re.IGNORECASE)
+      req_ner_text = pattern.sub("<mark data-entity='Processing'>{}</mark>".format(req.dfd_triple.process), req.req_text)
+      
+      pattern = re.compile(req.dfd_triple.data_store, re.IGNORECASE)
+      req_ner_text = pattern.sub("<mark data-entity='PII'>{}</mark>".format(req.dfd_triple.data_store), req_ner_text)
+
+      pattern = re.compile(req.dfd_triple.external_entity, re.IGNORECASE)
+      req_ner_text = pattern.sub("<mark data-entity='Subject'>{}</mark>".format(req.dfd_triple.external_entity), req_ner_text)
+      
+      req_ner[req.id] = req_ner_text
+      
+  for req in requirement_group:
+      pattern = re.compile(req.dfd_triple_group.process, re.IGNORECASE)
+      req_ner_text = pattern.sub("<mark data-entity='Processing'>{}</mark>".format(req.dfd_triple_group.process), req.req_text)
+      
+      pattern = re.compile(req.dfd_triple_group.data_store, re.IGNORECASE)
+      req_ner_text = pattern.sub("<mark data-entity='PII'>{}</mark>".format(req.dfd_triple_group.data_store), req_ner_text)
+
+      pattern = re.compile(req.dfd_triple_group.external_entity, re.IGNORECASE)
+      req_ner_text = pattern.sub("<mark data-entity='Subject'>{}</mark>".format(req.dfd_triple_group.external_entity), req_ner_text)
+      
+      req_group_ner[req.id] = req_ner_text
+      
+  return render_template('privacy_backlog.html', requirements=requirements, requirement_group=requirement_group, req_ner=req_ner, req_group_ner=req_group_ner, project_id=project_id)
+
+  
+def generate_features(requirements, title, group=False, req_len=0):
   lines = []
+  
+  for i, req in enumerate(requirements):
+    print("Generating Features for Story #", req.id)
+    
+    story_key = i + req_len if group  else i
 
-  for story in stories:
-    print("Generating Features for Story #", story.id)
-
-    # now it takes too long for this! a better machine required
-    features_all = pp.construct_features(story.story)
+    features_all = pp.construct_features(req.req_text, story_key)
 
     for i_pattern, features in enumerate(features_all):
-
       line = ""
-      line += "{} qid:{}".format(1, story.id) # 1 does not mean anything
+      if group:
+        line += "{} qid:g{}".format(1, req.id) # 1 does not mean anything
+      else:
+        line += "{} qid:r{}".format(1, req.id)
+        
       for i_feature, val in enumerate(features):
         line += " {}:{}".format(i_feature+1, val)
 
       line += " #docid={}".format(title[i_pattern].replace(" ","-"))
 
       lines.append(line)
+      
+  return lines
+
+@app.route('/gen_pattern_recommendation', methods=['POST'])
+@login_required
+def gen_pattern_recommendation():
+  save_action("gen_pattern_recommendation")
+  project_id = request.form['project_id']
   
+  requirements = Requirements.query.join(Dfd_triple, Dfd_triple.id==Requirements.triple_id).join(Stories, Stories.id==Dfd_triple.story_id).filter(Stories.project_id==project_id, Requirements.valid=="yes").all()
+  requirement_group = RequirementGroup.query.join(Dfd_triple_group, Dfd_triple_group.id==RequirementGroup.triple_id).join(Dfd, Dfd.id==Dfd_triple_group.dfd_id).filter(Dfd.project_id==project_id, RequirementGroup.valid=="yes").all()
+
+  X, title, excerpt = pp.get_corpus_pattern()
+
+  
+  all_story = [req.req_text for req in requirements]
+  req_len = len(all_story)
+  all_story += [req.req_text for req in requirement_group]
+  
+  pp.construct_story_embeddings(all_story)
+
+  lines = generate_features(requirements, title)
+  lines += generate_features(requirement_group, title, True, req_len)
+
   print("Done generating Features!")
 
   LTR_filename = "LTR_resources/ltr_{}.txt".format(project_id)
@@ -770,9 +930,11 @@ def gen_pattern_recommendation():
   return jsonify({'success' : 'success'})
 
 @app.route('/gen_group_dfd', methods=['POST'])
+@login_required
 def gen_group_dfd():
   if request.method == 'POST':
     from dfd_generation import StoryDFD
+    save_action("gen_group_dfd")
 
     story_ids = request.form['strid'].split(";")[:-1]
     stories = []
@@ -795,14 +957,18 @@ def gen_group_dfd():
     db.session.add(new_data)
     db.session.commit()
 
-    save_dfd_triple("static/dfd/" + project_name + "Group/" + filename + ".csv", dfd_id=new_data.id)
+    save_dfd_triple(root_dfd_folder + "/" + project_name + "Group/" + filename + ".csv", dfd_id=new_data.id)
     save_privacy_requirement_group(new_data.id)
   
   return jsonify({'success' : 'success'})
 
 @app.route('/see_dfd_detail', methods=['POST'])
+@login_required
 def see_dfd_detail():
   dfdid = request.form['dfdid']
+  
+  save_action("see_dfd_detail")
+  
   dfd = Dfd.query.filter(Dfd.id==dfdid).one()
   project = Project.query.filter(Project.id==dfd.project_id).one()
 
@@ -835,20 +1001,24 @@ def see_dfd_detail():
   return jsonify({'htmlresponse' : render_template('dfd_detail.html', dfd=dfd, url_dfd=url_dfd, url_robust=url_robust, url_dfd_xml=url_dfd_xml, triples=triples, all_requirements=all_requirements)})
 
 @app.route('/delete_triple', methods=['POST'])
+@login_required
 def delete_triple():
   triple_id = request.form['tripleid']
   Requirements.query.filter(Requirements.triple_id==triple_id).delete()
   Dfd_triple.query.filter(Dfd_triple.id==triple_id).delete()
+  save_action("delete_triple")
 
   db.session.commit()
 
   return jsonify({'htmlresponse' : 'OK'})
 
 @app.route('/delete_triple_group', methods=['POST'])
+@login_required
 def delete_triple_group():
   triple_id = request.form['tripleid']
   RequirementGroup.query.filter(RequirementGroup.triple_id==triple_id).delete()
   Dfd_triple_group.query.filter(Dfd_triple_group.id==triple_id).delete()
+  save_action("delete_triple_group")
 
   db.session.commit()
 
@@ -856,6 +1026,7 @@ def delete_triple_group():
 
 
 @app.route('/show_dfd', methods=['POST'])
+@login_required
 def show_dfd():
   story_id = request.form['story_id']
   story = Stories.query.filter(Stories.id==story_id).one()
@@ -863,6 +1034,7 @@ def show_dfd():
   entities = Entities.query.filter(Entities.story_id==story_id).all()
 
   triples = Dfd_triple.query.filter(Dfd_triple.story_id==story_id).all()
+  save_action("show_dfd")
 
   if len(triples) == 0:
     return jsonify({'htmlresponse' : 'DFD not yet generated'})
@@ -898,17 +1070,20 @@ def show_dfd():
   story_ner = " ".join(chunks)
 
     
-  url_dfd = "dfd/{}/s_{}_dfd.png".format(project.name, story_id)
-  url_dfd_xml = "dfd/{}/s_{}.xml".format(project.name, story_id)
-  url_robust = "dfd/{}/s_{}_robust.png".format(project.name, story_id)
+  url_dfd = "dfd/{}/{}/s_{}_dfd.png".format(current_user.id,project.name, story_id)
+  url_dfd_xml = "dfd/{}/{}/s_{}.xml".format(current_user.id,project.name, story_id)
+  url_robust = "dfd/{}/{}/s_{}_robust.png".format(current_user.id,project.name, story_id)
 
   return jsonify({'htmlresponse' : render_template('story_dfd.html', story=story, story_ner=story_ner, url_dfd=url_dfd, url_robust=url_robust, url_dfd_xml=url_dfd_xml, all_requirements=all_requirements, triples=triples)})
 
 
 @app.route('/privacy_backlog', methods=['POST'])
+@login_required
 def privacy_backlog():
+  save_action("privacy_backlog")
+  
   project_id = request.form['project_id']
-  requirements = Requirements.qusery.join(Dfd_triple, Dfd_triple.id==Requirements.triple_id).join(Stories, Stories.id==Dfd_triple.story_id).filter(Stories.project_id==project_id, Requirements.valid=="yes").all()
+  requirements = Requirements.query.join(Dfd_triple, Dfd_triple.id==Requirements.triple_id).join(Stories, Stories.id==Dfd_triple.story_id).filter(Stories.project_id==project_id, Requirements.valid=="yes").all()
 
   requirement_group = RequirementGroup.query.join(Dfd_triple_group, Dfd_triple_group.id==RequirementGroup.triple_id).join(Dfd, Dfd.id==Dfd_triple_group.dfd_id).filter(Dfd.project_id==project_id, RequirementGroup.valid=="yes").all()
 
@@ -916,4 +1091,4 @@ def privacy_backlog():
 
 
 if __name__ == "__main__":
-  app.run(debug=True)
+  app.run(host='0.0.0.0', port=5000, debug=True)
